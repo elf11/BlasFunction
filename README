@@ -1,0 +1,107 @@
+#########################################################################
+# Author: NICULAESCU OANA
+#            331CB
+#
+########################################################################
+Continutul arhivei:
+   - main.c - fisier sursa
+   - Makefile - diferite tipuri de variabile care vor rezulta in taguri diferite pentru executabile diferite(detaliat mai jos).
+   - opteron_script.sh/nehalem_script.sh/quad_script.sh - (fisier executat pe noduri, pe fiecare arhitectura in mod diferit) script standard care este apelat de run.sh, scriptul poate cere rularea executabilului doar o singura data pe coada sau de mai multe ori cu valori diferite
+   - run.sh - script standard pentru submis joburi nodurilor
+In plus exista 2 foldere, Data_base_run(datele obtinute in urma rularii variantei standard pe noduri), Data_o5_flag(datele obtinute in urma rularii variantei cu flagul -O5 activat in compilerul gcc) si Data_improved_flags(datele obtinute in urma rularii variantei imbunatatite in urma aplicarii unei serii de flaguri).
+    - in fiecare dintre directoarele amintite anterior(Data_base_run, Data_o5_flag si Data_improved_flags) se gasesc 4 fisiere de date, dupa cum urmeaza:
+    * out.txt/out_o5.txt/out_improved.txt contin date ale rularii programului o singura data pe matrice Hilbert de dimensiune 35000x35000 pe toate cele 3 arhitecturi, pentru aceste fisiere este generat cate un grafic in fiecare director, grafic in format *.png denumit "comparation_between_arhitectures.png", graficul ilustreaza diferenta de timp necesara computarii inmultirii matricei cu vectorul pe cele 3 arhitecturi;
+    * out_opteron.txt/out_opteron_o5.txt/out_opteron_improved.txt contin date ale rularii programului pe nodurile Opteron, rularea se face cu valori ale dimensiunii matricei intre 34200-35000, din 200 in 200.Graficele rezultate in urma acestor rulari se gasesc in fisierele *.png denumite different_runs_for_opteron.png; Aceleasi fisiere se gasesc si pentru arhitecturile Nehalem si Quad.
+    * draw_graphs.gnu - script gnuplot in cadrul caruia se face setarea terminalului de plotare precum si modul de afisare al datelor.
+    * draw.sh - script prin care este apelat scriptul de plotare draw_graphs.gnu
+    *run_draw.sh - script care apeleaza scriptul de desenare efectiv pentru fiecare dintre arhitecturi
+
+    - README - fisier readme
+
+########################################################################
+#
+#       Modul de rezolvare
+#
+#########################################################################
+
+Scopul temei era implementarea operatiei de inmultire dintre un vector si o matrice, dupa cum urmeaza:
+    Y[] = alfa * A[][] * X[] + beta * Y[] 
+    unde : X, Y = vectori(double), dimensiune N
+            A = matrice(double), dimensiune N X N
+In urma implementarii "de mana" a acestei operatii trebuia realizata o comparatie intre timpul petrecut de functia implementata de mana si functia de biblioteca implamentata de atlas(cblas_dsymv).
+Dimensiunea N, a variabilelor implicate in operatie este primita ca argument in toate testele, memoria este alocata dinamic, cele 2 valori alfa si beta sunt generate random, matricea implicata in operatie este o matrice speciala : matricea HILBERT.
+Dimensiunea testelor este de 35000, am testat pentru dimensiuni ale matricei intre 2-42000, dar am ales ca dimensiune de plotarea dimensiunea de 35000 deoarece testele pe aceasta dimensiune mi s-au parut cele mai relevante, rularea temei pe cluster ocupand mai putin timp cu aceasta dimensiune decat daca as fi rulat cu dimensiuni mai mari si in plus timpul de executie al functiei de biblioteca cblas_dsymv fiind in jurul a 2 secunde pentru cele mai multe teste care au avut aceasta dimensiune. Am testat si cu valori intre 34200-35000 si am creat o serie de grafice si pentru aceste dimensiuni, comparative pentru fiecare arhitectura. Timpul de executie este masurat cu gettimeofday si este masurat strict timpul de executie al opratiei de inmultire si nu timpul necesar initializarilor. (este masurat in secunde).
+
+########################################################################
+#
+#       Implementarea de baza
+#
+########################################################################
+
+Abordarea pentru implementarea de baza este cea clasica, 2 cicluri for in cadrul carora inmultesc matricea A cu vectorul X, rezultatul acestei inmultiri este multiplicat cu factorul alfa si mai apoi adunat la vectorul Y inmultit cu factorul beta.
+Matricea A[][] asa cum am spus mai devreme este o matrice speciala, matricea HILBERT, deoarece era necesara gasirea unei matrice care la fiecare apel sa fie generata constant, asa cum a fost sugerat de MatrixMarket.
+Generarea matricei HILBERT:
+    fi = 0.0;
+    for (i = 0; i < size; i += 1)
+	{
+		b[i] = 0.0;
+		fj = 0.0;
+
+		for (j = 0; j < size; j += 1)
+		{
+			mat[i][j] = 1.0 / (fi + fj + 1.0);
+			h[i][j] = mat[i][j];
+			b[i] = b[i] + mat[i][j];
+			fj = fj + 1.0;
+		}
+		fi = fi + 1.0;
+		mat[i][size] = b[i];
+	}
+
+Pentru aceasta implementare am obtinut timpi urmatori:
+    arhitectura Nehalem : 5.99 sec
+    arhitectura Opteron : 12.92 sec
+    arhitectura Quad    : 13.96 sec
+
+########################################################################
+#
+#       Implementarea optimizata de compilator
+#
+########################################################################
+
+Optimizarea temei consta in aplicarea unor flaguri pentru compilatorul de gcc:
+
+1. Am aplicat mai intai flagul de -O5:
+    - flagul acesta da enable pentru optimizari agresive de IPA si inlining, ceea ce se traduce prin: 
+        * IPA = InterproceduralAnalysis si inseamna ca gcc se va ocupa de propagarea constantelor intre proceduri, optimizarea codului trecerea la pointeri, detectarea alinierii in memorie si propagarea acesteia, detectarea si modificare variabilelor globale, optimizarea functiilor inline si optimizari ale librariilor folosite.
+   Doar aplicarea acestui flag a dus la o imbunatatire remarcabila a performantei functiei implementate de "mana", timpii scosi acum pe cele 3 arhitecturi fiind cam 1/3 din timpul initial, dupa cum urmeaza:
+    nehalem : 2.01 sec
+    opteron : 3.96 sec
+    quad    : 4.99 sec
+Acest lucru era de asteptat deoarece acum compilatorul se ocupa de tot ceea ce inseamna optimizari, de accesarea variabilelor = acum acestea sunt accesate continuu cu ajutorul pointerilor.
+
+2. Am dorit sa vad cum aj putea ajunge la astfel de performante aplicand o serie de flaguri de compilare:
+
+Flaguri generice:
+    * -O3 : activeaza nivelul standard maxim de optimizare
+    * -funroll-loops : activeaza loop unrolling pentru buclele care opereaza cu date independente
+    * -mfmath=sse : foloseste setul de instructiuni din sse
+    * -minline-all-stringops : inlocuieste memset cu apeluri buildin gcc
+    * -mxc16 : util pentru contori mari ce sunt folositi de mai multe core-uri
+    * -m64 : specifica tipul de arhitectura pe 64 de biti
+    * -ftree-loop-distribution : este util in operatiile de vectorizare permite distribuirea operatiilor din loop
+    
+########################################################################
+#
+#       Concluzii
+#
+########################################################################
+
+In urma testelor efectuate am observat urmatoarele:
+
+    - compilarea cu -O5 obtine timpi foarte buni pe toate cele 3 arhitecturi, pe arhitectura Nehalem timpii obtinuti cu acest flag sunt apropiati de timpii obtinuti cu acelasi flag de functia de biblioteca CBLAS pe arhitecturile Opteron si Quad
+    - compilarea cu flagurile de compilare reduce timpul de rulare al variantei implementate "de mana" la jumatate pe toate cele 3 arhitecturi.
+    - arhitectura Nehalem a avut timpii cei mai buni, fiind mai performanta decat celelalte doua.
+
+Eficienta unui program depinde in egala masura de arhitectura si resursele folosite dar si de algoritmul si modul de implementare.
+
